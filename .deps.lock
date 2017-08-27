@@ -1,0 +1,20 @@
+{
+  "": {
+    "dependencies": {
+      "di": "_deps/di"
+    }
+  }, 
+  "_deps/cppmutest": {
+    "commit": "6e7f21ff4eaa903559d0398848cf2e8267142770", 
+    "type": "git", 
+    "url": "https://github.com/avakar/cppmutest.git"
+  }, 
+  "_deps/di": {
+    "commit": "a1782c2dad754fbb8ac6dcd2a110d2f1b5db9ef8", 
+    "dependencies": {
+      "cppmutest": "_deps/cppmutest"
+    }, 
+    "type": "git", 
+    "url": "https://github.com/avakar/di.git"
+  }
+}
