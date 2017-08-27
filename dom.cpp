@@ -30,7 +30,7 @@ void dom::node::remove()
 		}
 		else if (cur->type_ == node_type::text)
 		{
-			text_node * n = static_cast<text_node *>(cur);
+			dom::text * n = static_cast<dom::text *>(cur);
 			cur = n->next_;
 			delete n;
 		}

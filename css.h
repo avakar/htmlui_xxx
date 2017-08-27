@@ -14,6 +14,13 @@ enum class css_display
 	kw_inline_block,
 };
 
+enum class css_font_style
+{
+	kw_normal,
+	kw_italic,
+	kw_oblique,
+};
+
 struct css_percentage
 {
 	float value;
