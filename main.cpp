@@ -4,6 +4,7 @@
 #include <list>
 #include <assert.h>
 #include <algorithm>
+#include <map>
 
 #include <avakar/di.h>
 using avakar::di;
@@ -99,40 +100,7 @@ struct fmt_context
 
 struct font
 {
-	virtual void measure(std::string_view text) = 0;
-};
-
-struct font_factory
-{
-	virtual std::shared_ptr<font> create_font() = 0;
-};
-
-
-struct layouter
-{
-	using deps_t = di<font_factory *>;
-
-	layouter(deps_t deps)
-		: deps_(deps)
-	{
-	}
-
-	void layout_block(dom::element * elem, fmt_context & fmt, int x, int y, int dx)
-	{
-		auto font = deps_.get<font_factory *>()->create_font();
-
-		for (dom::node * n = elem->first_child_; n != nullptr; n = n->next_)
-		{
-			if (n->type_ == dom::node_type::text)
-			{
-				dom::text * t = static_cast<dom::text *>(n);
-				font->measure(t->value);
-			}
-		}
-	}
-
-private:
-	deps_t deps_;
+	HFONT hfont;
 };
 
 void layout_block(dom::element * elem, fmt_context & fmt, int x, int y, int dx)
@@ -168,35 +136,19 @@ void layout_block(dom::element * elem, fmt_context & fmt, int x, int y, int dx)
 
 extern "C" ULONG __ImageBase;
 
-struct gdi_text_measurer
+struct font_id
 {
-	virtual void measure(HFONT font, std::string_view text) = 0;
-};
+	std::string name;
+	int size;
+	bool italic;
 
-struct gdi_font final
-	: font
-{
-	gdi_font(gdi_text_measurer & measurer, HFONT hfont)
-		: measurer_(measurer), hfont_(hfont)
+	bool operator<(font_id const & rhs) const
 	{
+		return std::tie(name, size, italic) < std::tie(rhs.name, rhs.size, rhs.italic);
 	}
-
-	~gdi_font()
-	{
-		DeleteObject(hfont_);
-	}
-
-	void measure(std::string_view text) override
-	{
-	}
-
-private:
-	gdi_text_measurer & measurer_;
-	HFONT hfont_;
 };
 
 struct window final
-	: gdi_text_measurer, font_factory
 {
 	window()
 	{
@@ -214,14 +166,6 @@ struct window final
 		ShowWindow(hwnd_, SW_SHOW);
 	}
 
-	std::shared_ptr<font> create_font() override
-	{
-		HFONT hfont = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-			OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Tahoma");
-
-		return std::make_shared<gdi_font>(*this, hfont);
-	}
-
 	void set_document(dom::element * doc)
 	{
 		document_ = doc;
@@ -237,31 +181,58 @@ private:
 	HBITMAP backbmp_ = nullptr;
 	int width_;
 	int height_;
-	HFONT xxx_font_ = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Tahoma");
+	std::map<font_id, std::weak_ptr<font>> font_cache_;
 
 	HBRUSH brush = CreateSolidBrush(RGB(255, 0, 0));
 
-	void measure(HFONT font, std::string_view text) override
+	static std::wstring to_utf16(std::string_view str)
 	{
+		std::wstring res;
+		int len = MultiByteToWideChar(CP_UTF8, 0, str.data(), str.size(), nullptr, 0);
+		res.resize(len + 1);
+		MultiByteToWideChar(CP_UTF8, 0, str.data(), str.size(), &res[0], res.size());
+		res.pop_back();
+		return res;
 	}
 
-	void layout_block(dom::element * elem, fmt_context & fmt, int y)
+	std::shared_ptr<font> get_font(css::style const & style)
 	{
+		int font_size = std::get<css::length>(style.font_size).value;
+
+		font_id id{ style.font_family, font_size, style.font_style == css::font_style::kw_italic };
+		auto it = font_cache_.find(id);
+		if (it != font_cache_.end())
+		{
+			if (auto r = it->second.lock())
+				return r;
+		}
+
+		auto r = std::make_shared<font>();
+		r->hfont = CreateFontW(-id.size, 0, 0, 0, FW_NORMAL, id.italic, FALSE, FALSE, DEFAULT_CHARSET,
+			OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, to_utf16(id.name).c_str());
+		font_cache_[id] = r;
+		return r;
+	}
+
+	void layout_block(dom::element * elem, fmt_context & fmt)
+	{
+		elem->font = this->get_font(*elem->style);
+
 		for (dom::node * n = elem->first_child_; n != nullptr; n = n->next_)
 		{
-			if (n->type_ == dom::node_type::text)
+			if (n->type_ == dom::node_type::element)
+			{
+				dom::element * e = static_cast<dom::element *>(n);
+				layout_block(e, fmt);
+			}
+			else if (n->type_ == dom::node_type::text)
 			{
 				dom::text * t = static_cast<dom::text *>(n);
 				if (t->value.empty())
 					continue;
 
-				int len = MultiByteToWideChar(CP_UTF8, 0, t->value.data(), t->value.size(), nullptr, 0);
-				t->render_value.resize(len + 1);
-				MultiByteToWideChar(CP_UTF8, 0, t->value.data(), t->value.size(), &t->render_value[0], t->render_value.size());
-				t->render_value.pop_back();
-
-				SelectObject(backdc_, xxx_font_);
+				t->render_value = to_utf16(t->value);
+				SelectObject(backdc_, elem->font->hfont);
 
 				TEXTMETRICW tm;
 				GetTextMetricsW(backdc_, &tm);
@@ -335,7 +306,12 @@ private:
 
 		for (dom::node * n = elem->first_child_; n != nullptr; n = n->next_)
 		{
-			if (n->type_ == dom::node_type::text)
+			if (n->type_ == dom::node_type::element)
+			{
+				dom::element * e = static_cast<dom::element *>(n);
+				render_block(e, ctx);
+			}
+			else if (n->type_ == dom::node_type::text)
 			{
 				dom::text * t = static_cast<dom::text *>(n);
 
@@ -350,6 +326,7 @@ private:
 					if (lb.last_ == t)
 						last = lb.last_idx_;
 
+					SelectObject(backdc_, elem->font->hfont);
 					TextOutW(backdc_, t->x, lb.y, t->render_value.c_str() + first, last - first);
 				}
 			}
@@ -372,7 +349,7 @@ private:
 		fmt_context fmt_ctx;
 		fmt_ctx.x = 0;
 		fmt_ctx.dx = width_;
-		this->layout_block(document_, fmt_ctx, 0);
+		this->layout_block(document_, fmt_ctx);
 		this->render_block(document_, &fmt_ctx);
 	}
 
@@ -436,17 +413,23 @@ private:
 
 int main(int argc, char * argv[])
 {
+	css::style body_style;
+	body_style.font_family = "Tahoma";
+	body_style.font_size = css::length{ 16};
+
+	css::style em_style;
+	em_style.font_family = "Tahoma";
+	em_style.font_size = css::length{ 16 };
+	em_style.font_style = css::font_style::kw_italic;
+
 	dom::element root;
-	root.font_family = "Tahoma";
-	root.font_size = css_length{16};
+	root.style = std::shared_ptr<css::style>(std::shared_ptr<void>(), &body_style);
 
 	root.append_text("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eu est velit."
 		"Ut dictum massa et mauris mattis suscipit. Proin finibus ultrices convallis. Curabitur tempus semper mauris, vel tempus dolor efficitur in. ");
 
 	auto * em = root.append_element("em");
-	em->font_family = "Tahoma";
-	em->font_size = css_length{16};
-	em->font_style = css_font_style::kw_italic;
+	em->style = std::shared_ptr<css::style>(std::shared_ptr<void>(), &em_style);
 
 	em->append_text(
 		"Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Suspendisse potenti.Phasellus sed auctor mi. ");

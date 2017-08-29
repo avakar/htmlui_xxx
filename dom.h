@@ -1,8 +1,9 @@
-#include "css.h"
+ #include "css.h"
 #include <string>
 #include <memory>
 
 struct fmt_context;
+struct font;
 
 namespace dom {
 
@@ -15,8 +16,6 @@ struct string_list
 	size_t size();
 	std::string operator[](size_t index);
 };
-
-
 
 enum class node_type
 {
@@ -89,33 +88,19 @@ struct element final
 		return n;
 	}
 
-	css_color background_color;
-
-	css_display display;
-
-	css_dimension width;
-	css_dimension height;
-
-	css_dimension margin_left;
-	css_dimension margin_right;
-	css_dimension margin_top;
-	css_dimension margin_bottom;
-
-	css_font_style font_style = css_font_style::kw_normal;
-	css_dimension font_size;
-	std::string font_family;
-
-
+	std::shared_ptr<css::style> style;
 	std::shared_ptr<fmt_context> fmt_context;
+
+	std::shared_ptr<font> font;
 
 	bool is_inline_level() const
 	{
-		return display == css_display::kw_inline || display == css_display::kw_inline_block;
+		return style->display == css::css_display::kw_inline || style->display == css::css_display::kw_inline_block;
 	}
 
 	bool is_block_level() const
 	{
-		return display == css_display::kw_block;
+		return style->display == css::css_display::kw_block;
 	}
 };
 

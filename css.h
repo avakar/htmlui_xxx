@@ -2,6 +2,11 @@
 #define CSS_H
 
 #include <variant>
+#include <string>
+#include <stdint.h>
+
+namespace css {
+
 struct css_auto
 {
 };
@@ -14,7 +19,7 @@ enum class css_display
 	kw_inline_block,
 };
 
-enum class css_font_style
+enum class font_style
 {
 	kw_normal,
 	kw_italic,
@@ -23,12 +28,12 @@ enum class css_font_style
 
 struct css_percentage
 {
-	float value;
+	int value;
 };
 
-struct css_length
+struct length
 {
-	float value;
+	int value;
 };
 
 struct css_color
@@ -36,6 +41,27 @@ struct css_color
 	uint8_t r, g, b;
 };
 
-using css_dimension = std::variant<css_auto, css_percentage, css_length>;
+using css_dimension = std::variant<css_auto, css_percentage, length>;
+
+struct style
+{
+	css_color background_color;
+
+	css_display display;
+
+	css_dimension width;
+	css_dimension height;
+
+	css_dimension margin_left;
+	css_dimension margin_right;
+	css_dimension margin_top;
+	css_dimension margin_bottom;
+
+	font_style font_style = font_style::kw_normal;
+	css_dimension font_size;
+	std::string font_family;
+};
+
+}
 
 #endif
