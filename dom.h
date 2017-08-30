@@ -4,6 +4,7 @@
 
 struct fmt_context;
 struct font;
+struct brush;
 
 namespace dom {
 
@@ -92,6 +93,7 @@ struct element final
 	std::shared_ptr<fmt_context> fmt_context;
 
 	std::shared_ptr<font> font;
+	std::shared_ptr<brush> brush;
 
 	bool is_inline_level() const
 	{

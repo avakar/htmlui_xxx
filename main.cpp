@@ -91,7 +91,12 @@ struct fmt_context
 
 	int remaining()
 	{
-		return !line_open? dx: dx - line_boxes.back().consumed_dx;
+		return dx - this->next_x();
+	}
+
+	int next_x()
+	{
+		return !line_open? 0: line_boxes.back().consumed_dx;
 	}
 };
 
@@ -101,6 +106,11 @@ struct fmt_context
 struct font
 {
 	HFONT hfont;
+};
+
+struct brush
+{
+	HBRUSH hbrush;
 };
 
 void layout_block(dom::element * elem, fmt_context & fmt, int x, int y, int dx)
@@ -182,8 +192,7 @@ private:
 	int width_;
 	int height_;
 	std::map<font_id, std::weak_ptr<font>> font_cache_;
-
-	HBRUSH brush = CreateSolidBrush(RGB(255, 0, 0));
+	std::map<css::color, std::weak_ptr<brush>> brush_cache_;
 
 	static std::wstring to_utf16(std::string_view str)
 	{
@@ -214,9 +223,25 @@ private:
 		return r;
 	}
 
+	std::shared_ptr<brush> get_brush(css::color const & color)
+	{
+		auto it = brush_cache_.find(color);
+		if (it != brush_cache_.end())
+		{
+			if (auto r = it->second.lock())
+				return r;
+		}
+
+		auto r = std::make_shared<brush>();
+		r->hbrush = CreateSolidBrush(RGB(color.r, color.g, color.b));
+		brush_cache_[color] = r;
+		return r;
+	}
+
 	void layout_block(dom::element * elem, fmt_context & fmt)
 	{
 		elem->font = this->get_font(*elem->style);
+		elem->brush = this->get_brush(elem->style->background_color);
 
 		for (dom::node * n = elem->first_child_; n != nullptr; n = n->next_)
 		{
@@ -239,6 +264,7 @@ private:
 
 				std::vector<int> partial_widths(t->render_value.size());
 
+				t->x = fmt.next_x();
 				t->y = fmt.current_line();
 
 				size_t first = 0;
@@ -315,19 +341,24 @@ private:
 			{
 				dom::text * t = static_cast<dom::text *>(n);
 
+				SelectObject(backdc_, elem->font->hfont);
+
 				for (int line = t->y; line <= t->dy; ++line)
 				{
 					auto & lb = ctx->line_boxes[line];
 
 					size_t first = 0;
 					size_t last = t->render_value.size();
+					int x = t->x;
 					if (lb.first_ == t)
+					{
 						first = lb.first_idx_;
+						x = 0;
+					}
 					if (lb.last_ == t)
 						last = lb.last_idx_;
 
-					SelectObject(backdc_, elem->font->hfont);
-					TextOutW(backdc_, t->x, lb.y, t->render_value.c_str() + first, last - first);
+					TextOutW(backdc_, x, lb.y, t->render_value.c_str() + first, last - first);
 				}
 			}
 		}
@@ -350,6 +381,10 @@ private:
 		fmt_ctx.x = 0;
 		fmt_ctx.dx = width_;
 		this->layout_block(document_, fmt_ctx);
+
+		RECT rect = { 0, 0, width_, height_ };
+		FillRect(backdc_, &rect, document_->brush->hbrush);
+
 		this->render_block(document_, &fmt_ctx);
 	}
 
@@ -367,14 +402,10 @@ private:
 
 		backdc_ = CreateCompatibleDC(dc);
 		backbmp_ = CreateCompatibleBitmap(dc, width, height);
-
+		ReleaseDC(hwnd_, dc);
 
 		SelectObject(backdc_, backbmp_);
-
-		RECT rect = { 100, 100, 200, 200 };
-		FillRect(backdc_, &rect, brush);
-
-		ReleaseDC(hwnd_, dc);
+		SetBkMode(backdc_, TRANSPARENT);
 
 		this->relayout();
 		InvalidateRect(hwnd_, nullptr, FALSE);
@@ -415,11 +446,12 @@ int main(int argc, char * argv[])
 {
 	css::style body_style;
 	body_style.font_family = "Tahoma";
-	body_style.font_size = css::length{ 16};
+	body_style.font_size = css::length{ 12};
+	body_style.background_color = css::color{255, 255, 255};
 
 	css::style em_style;
 	em_style.font_family = "Tahoma";
-	em_style.font_size = css::length{ 16 };
+	em_style.font_size = css::length{ 20 };
 	em_style.font_style = css::font_style::kw_italic;
 
 	dom::element root;

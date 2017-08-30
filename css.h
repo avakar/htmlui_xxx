@@ -4,6 +4,7 @@
 #include <variant>
 #include <string>
 #include <stdint.h>
+#include <tuple>
 
 namespace css {
 
@@ -36,16 +37,21 @@ struct length
 	int value;
 };
 
-struct css_color
+struct color
 {
-	uint8_t r, g, b;
+	uint8_t r, g, b, a;
+
+	bool operator<(color const & rhs) const
+	{
+		return std::tie(r, g, b, a) < std::tie(rhs.r, rhs.g, rhs.b, rhs.a);
+	}
 };
 
 using css_dimension = std::variant<css_auto, css_percentage, length>;
 
 struct style
 {
-	css_color background_color;
+	color background_color;
 
 	css_display display;
 
