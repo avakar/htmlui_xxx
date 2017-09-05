@@ -7,6 +7,8 @@ add_executable(avakar_tiny_html
     main.cpp
     dom.cpp
     dom.h
+    dom3.cpp
+    dom3.h
     css.h
     )
 target_link_libraries(avakar_tiny_html avakar_di)

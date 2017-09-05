@@ -11,6 +11,7 @@ using avakar::di;
 
 #include "css.h"
 #include "dom.h"
+#include "dom3.h"
 
 /*int resolve_dim(css_dimension const & dim, int parent, int autov = -1.f)
 {
@@ -442,8 +443,45 @@ private:
 
 };
 
+struct mystyle
+{
+	struct element
+	{
+		std::string s;
+	};
+
+	struct text
+	{
+		int i;
+	};
+};
+
 int main(int argc, char * argv[])
 {
+	dom3::property_map<mystyle> pm;
+	dom3::document ddoc = dom3::create_document(pm);
+
+	{
+		auto html = ddoc->create_element("html");
+		auto body = ddoc->create_element("body");
+		auto em = ddoc->create_element("em");
+
+		html->append_child(body);
+
+
+		body->append_child(ddoc->create_text_node("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eu est velit."
+			"Ut dictum massa et mauris mattis suscipit. Proin finibus ultrices convallis. Curabitur tempus semper mauris, vel tempus dolor efficitur in. "));
+
+		body->append_child(em);
+		em->append_child(ddoc->create_text_node(
+			"Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Suspendisse potenti.Phasellus sed auctor mi. "));
+
+		body->append_child(ddoc->create_text_node(
+			"Mauris nec volutpat libero, sit amet maximus augue. Proin ac maximus ante, eu convallis elit. Donec rutrum et arcu ac cursus."));
+
+		auto & z = pm->get_element_data(em);
+	}
+
 	css::style body_style;
 	body_style.font_family = "Tahoma";
 	body_style.font_size = css::length{ 12};
