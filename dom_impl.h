@@ -107,12 +107,14 @@ T * node_ptr<T>::operator->() const
 
 template <typename T>
 template <typename U>
-std::enable_if_t<is_node_intf<U>::value, node_ptr<U>> node_ptr<T>::cast()
+std::enable_if_t<is_node<U>::value, U> node_ptr<T>::cast()
 {
-	if (!ptr_ || ptr_->node_type() != U::node_type_id)
-		return node_ptr<U>();
+	using I = typename U::value_type;
 
-	return node_ptr<U>(static_cast<U *>(ptr_));
+	if (!ptr_ || ptr_->node_type() != I::node_type_id)
+		return U();
+
+	return U(static_cast<I *>(ptr_));
 }
 
 template <typename T>
@@ -153,6 +155,11 @@ struct _property_map_impl final
 
 	document doc;
 
+	_property_map_impl(document doc)
+		: doc(std::move(doc))
+	{
+	}
+
 	typename D::element & get_element_data(element e) override
 	{
 		assert(e->owner_document() == doc);
@@ -187,15 +194,15 @@ template <typename... Dn>
 struct _document_factory
 {
 	template <size_t I>
-	static void create_pms()
+	static void create_pms(document const &)
 	{
 	}
 
 	template <size_t I, typename A0, typename... An>
-	static void create_pms(property_map<A0> & a0, property_map<An> &... an)
+	static void create_pms(document const & doc, property_map<A0> & a0, property_map<An> &... an)
 	{
-		a0.reset(new _property_map_impl<I, Dn...>());
-		create_pms<I + 1>(an...);
+		a0.reset(new _property_map_impl<I, Dn...>(doc));
+		create_pms<I + 1>(doc, an...);
 	}
 };
 
@@ -203,7 +210,7 @@ template <typename... Dn>
 document create_document(property_map<Dn> &... pms)
 {
 	document doc_ptr(new _document_impl<Dn...>());
-	_document_factory<Dn...>::create_pms<0>(pms...);
+	_document_factory<Dn...>::create_pms<0>(doc_ptr, pms...);
 	return doc_ptr;
 }
 

@@ -11,7 +11,6 @@ using avakar::di;
 
 #include "css.h"
 #include "dom.h"
-#include "dom3.h"
 
 /*int resolve_dim(css_dimension const & dim, int parent, int autov = -1.f)
 {
@@ -36,10 +35,10 @@ struct fmt_context
 		int max_asc = 0;
 		int max_desc = 0;
 
-		dom::text * first_;
+		dom3::text first_;
 		size_t first_idx_;
 
-		dom::text * last_;
+		dom3::text last_;
 		size_t last_idx_;
 	};
 
@@ -55,7 +54,7 @@ struct fmt_context
 		return line_open? line_boxes.size() - 1: line_boxes.size();
 	}
 
-	void append_chunk(dom::text * n, size_t first, size_t last, int w, int asc, int desc)
+	void append_chunk(dom3::text const & n, size_t first, size_t last, int w, int asc, int desc)
 	{
 		if (!line_open)
 		{
@@ -114,7 +113,7 @@ struct brush
 	HBRUSH hbrush;
 };
 
-void layout_block(dom::element * elem, fmt_context & fmt, int x, int y, int dx)
+void layout_block(dom3::element const & elem, fmt_context & fmt, int x, int y, int dx)
 {
 /*	int w = resolve_dim(root->width, containing_block.dx);
 	int margin_left = resolve_dim(root->margin_left, containing_block.dx);
@@ -159,6 +158,25 @@ struct font_id
 	}
 };
 
+
+struct layout_domext
+{
+	struct element
+	{
+		std::shared_ptr<css::style> style;
+
+		std::shared_ptr<font> font;
+		std::shared_ptr<brush> brush;
+		std::shared_ptr<fmt_context> fmt_context;
+	};
+
+	struct text
+	{
+		int x, y, dx, dy;
+		std::wstring render_value;
+	};
+};
+
 struct window final
 {
 	window()
@@ -177,13 +195,15 @@ struct window final
 		ShowWindow(hwnd_, SW_SHOW);
 	}
 
-	void set_document(dom::element * doc)
+	void set_document(dom3::element doc, dom3::property_map<layout_domext> pm)
 	{
-		document_ = doc;
+		document_ = std::move(doc);
+		pm_ = std::move(pm);
 		this->relayout();
 	}
 
-	dom::element * document_ = nullptr;
+	dom3::element document_;
+	dom3::property_map<layout_domext> pm_;
 
 private:
 	HWND hwnd_;
@@ -239,55 +259,57 @@ private:
 		return r;
 	}
 
-	void layout_block(dom::element * elem, fmt_context & fmt)
+	void layout_block(dom3::element elem, fmt_context & fmt)
 	{
-		elem->font = this->get_font(*elem->style);
-		elem->brush = this->get_brush(elem->style->background_color);
+		auto & ext = pm_->get_element_data(elem);
 
-		for (dom::node * n = elem->first_child_; n != nullptr; n = n->next_)
+		ext.font = this->get_font(*ext.style);
+		ext.brush = this->get_brush(ext.style->background_color);
+
+		for (dom3::node n = elem->first_child(); n; n = n->next_sibling())
 		{
-			if (n->type_ == dom::node_type::element)
+			if (auto e = n.cast<dom3::element>())
 			{
-				dom::element * e = static_cast<dom::element *>(n);
 				layout_block(e, fmt);
 			}
-			else if (n->type_ == dom::node_type::text)
+			else if (auto t = n.cast<dom3::text>())
 			{
-				dom::text * t = static_cast<dom::text *>(n);
-				if (t->value.empty())
+				auto & tex = pm_->get_text_data(t);
+
+				if (t->data().empty())
 					continue;
 
-				t->render_value = to_utf16(t->value);
-				SelectObject(backdc_, elem->font->hfont);
+				tex.render_value = to_utf16(t->data());
+				SelectObject(backdc_, ext.font->hfont);
 
 				TEXTMETRICW tm;
 				GetTextMetricsW(backdc_, &tm);
 
-				std::vector<int> partial_widths(t->render_value.size());
+				std::vector<int> partial_widths(tex.render_value.size());
 
-				t->x = fmt.next_x();
-				t->y = fmt.current_line();
+				tex.x = fmt.next_x();
+				tex.y = fmt.current_line();
 
 				size_t first = 0;
 				for (;;)
 				{
 					int fit;
 					SIZE size;
-					GetTextExtentExPointW(backdc_, t->render_value.data() + first, t->render_value.size() - first, fmt.remaining(), &fit, partial_widths.data(), &size);
+					GetTextExtentExPointW(backdc_, tex.render_value.data() + first, tex.render_value.size() - first, fmt.remaining(), &fit, partial_widths.data(), &size);
 
 					size_t last;
 					int width;
 
-					if (fit == t->render_value.size() - first)
+					if (fit == tex.render_value.size() - first)
 					{
-						last = t->render_value.size();
+						last = tex.render_value.size();
 						width = size.cx;
 					}
 					else
 					{
 						for (last = fit + first; last > first; --last)
 						{
-							if (t->render_value[last - 1] == ' ')
+							if (tex.render_value[last - 1] == ' ')
 							{
 								break;
 							}
@@ -295,13 +317,13 @@ private:
 
 						if (last == first)
 						{
-							for (last = fit + first; last < t->render_value.size(); ++last)
+							for (last = fit + first; last < tex.render_value.size(); ++last)
 							{
-								if (t->render_value[last] == ' ')
+								if (tex.render_value[last] == ' ')
 									break;
 							}
 
-							GetTextExtentPoint32W(backdc_, t->render_value.data() + first, last - first, &size);
+							GetTextExtentPoint32W(backdc_, tex.render_value.data() + first, last - first, &size);
 							width = size.cx;
 						}
 						else
@@ -312,45 +334,46 @@ private:
 					}
 
 					fmt.append_chunk(t, first, last, width, tm.tmAscent, tm.tmDescent);
-					if (last != t->render_value.size())
+					if (last != tex.render_value.size())
 						fmt.line_break();
 
-					if (last == t->render_value.size())
+					if (last == tex.render_value.size())
 						break;
 
 					first = last + 1;
 				}
 
-				t->dy = fmt.current_line();
+				tex.dy = fmt.current_line();
 			}
 		}
 	}
 
-	void render_block(dom::element * elem, fmt_context * ctx)
+	void render_block(dom3::element elem, fmt_context * ctx)
 	{
-		if (elem->fmt_context)
-			ctx = elem->fmt_context.get();
+		auto & ext = pm_->get_element_data(elem);
 
-		for (dom::node * n = elem->first_child_; n != nullptr; n = n->next_)
+		if (ext.fmt_context)
+			ctx = ext.fmt_context.get();
+
+		for (dom3::node n = elem->first_child(); n; n = n->next_sibling())
 		{
-			if (n->type_ == dom::node_type::element)
+			if (auto e = n.cast<dom3::element>())
 			{
-				dom::element * e = static_cast<dom::element *>(n);
 				render_block(e, ctx);
 			}
-			else if (n->type_ == dom::node_type::text)
+			else if (auto t = n.cast<dom3::text>())
 			{
-				dom::text * t = static_cast<dom::text *>(n);
+				auto & tex = pm_->get_text_data(t);
 
-				SelectObject(backdc_, elem->font->hfont);
+				SelectObject(backdc_, ext.font->hfont);
 
-				for (int line = t->y; line <= t->dy; ++line)
+				for (int line = tex.y; line <= tex.dy; ++line)
 				{
 					auto & lb = ctx->line_boxes[line];
 
 					size_t first = 0;
-					size_t last = t->render_value.size();
-					int x = t->x;
+					size_t last = tex.render_value.size();
+					int x = tex.x;
 					if (lb.first_ == t)
 					{
 						first = lb.first_idx_;
@@ -359,7 +382,7 @@ private:
 					if (lb.last_ == t)
 						last = lb.last_idx_;
 
-					TextOutW(backdc_, x, lb.y, t->render_value.c_str() + first, last - first);
+					TextOutW(backdc_, x, lb.y, tex.render_value.c_str() + first, last - first);
 				}
 			}
 		}
@@ -384,7 +407,7 @@ private:
 		this->layout_block(document_, fmt_ctx);
 
 		RECT rect = { 0, 0, width_, height_ };
-		FillRect(backdc_, &rect, document_->brush->hbrush);
+		FillRect(backdc_, &rect, pm_->get_element_data(document_).brush->hbrush);
 
 		this->render_block(document_, &fmt_ctx);
 	}
@@ -443,74 +466,43 @@ private:
 
 };
 
-struct mystyle
-{
-	struct element
-	{
-		std::string s;
-	};
-
-	struct text
-	{
-		int i;
-	};
-};
-
 int main(int argc, char * argv[])
 {
-	dom3::property_map<mystyle> pm;
-	dom3::document ddoc = dom3::create_document(pm);
-
-	{
-		auto html = ddoc->create_element("html");
-		auto body = ddoc->create_element("body");
-		auto em = ddoc->create_element("em");
-
-		html->append_child(body);
-
-
-		body->append_child(ddoc->create_text_node("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eu est velit."
-			"Ut dictum massa et mauris mattis suscipit. Proin finibus ultrices convallis. Curabitur tempus semper mauris, vel tempus dolor efficitur in. "));
-
-		body->append_child(em);
-		em->append_child(ddoc->create_text_node(
-			"Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Suspendisse potenti.Phasellus sed auctor mi. "));
-
-		body->append_child(ddoc->create_text_node(
-			"Mauris nec volutpat libero, sit amet maximus augue. Proin ac maximus ante, eu convallis elit. Donec rutrum et arcu ac cursus."));
-
-		ddoc->append_child(html);
-
-		auto & z = pm->get_element_data(em);
-	}
-
-	css::style body_style;
+	css::style body_style = {};
 	body_style.font_family = "Tahoma";
-	body_style.font_size = css::length{ 12};
-	body_style.background_color = css::color{255, 255, 255};
+	body_style.font_size = css::length{ 12 };
+	body_style.background_color = css::color{ 255, 255, 255 };
 
-	css::style em_style;
+	css::style em_style = {};
 	em_style.font_family = "Tahoma";
 	em_style.font_size = css::length{ 20 };
 	em_style.font_style = css::font_style::kw_italic;
 
-	dom::element root;
-	root.style = std::shared_ptr<css::style>(std::shared_ptr<void>(), &body_style);
+	dom3::property_map<layout_domext> layout_pm;
+	dom3::document ddoc = dom3::create_document(layout_pm);
 
-	root.append_text("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eu est velit."
-		"Ut dictum massa et mauris mattis suscipit. Proin finibus ultrices convallis. Curabitur tempus semper mauris, vel tempus dolor efficitur in. ");
+	auto html = ddoc->create_element("html");
+	auto body = ddoc->create_element("body");
+	layout_pm->get_element_data(body).style = std::shared_ptr<css::style>(std::shared_ptr<void>(), &body_style);
 
-	auto * em = root.append_element("em");
-	em->style = std::shared_ptr<css::style>(std::shared_ptr<void>(), &em_style);
+	auto em = ddoc->create_element("em");
+	layout_pm->get_element_data(em).style = std::shared_ptr<css::style>(std::shared_ptr<void>(), &em_style);
 
-	em->append_text(
-		"Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Suspendisse potenti.Phasellus sed auctor mi. ");
+	html->append_child(body);
+	body->append_child(ddoc->create_text_node("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eu est velit."
+		"Ut dictum massa et mauris mattis suscipit. Proin finibus ultrices convallis. Curabitur tempus semper mauris, vel tempus dolor efficitur in. "));
 
-	root.append_text(
-		"Mauris nec volutpat libero, sit amet maximus augue. Proin ac maximus ante, eu convallis elit. Donec rutrum et arcu ac cursus.");
+	body->append_child(em);
+	em->append_child(ddoc->create_text_node(
+		"Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Suspendisse potenti.Phasellus sed auctor mi. "));
+
+	body->append_child(ddoc->create_text_node(
+		"Mauris nec volutpat libero, sit amet maximus augue. Proin ac maximus ante, eu convallis elit. Donec rutrum et arcu ac cursus."));
+
+	ddoc->append_child(html);
 
 	window wnd;
-	wnd.set_document(&root);
+	wnd.set_document(body, layout_pm);
 
 	MSG msg;
 	while (GetMessageW(&msg, nullptr, 0, 0) > 0)
