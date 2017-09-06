@@ -13,7 +13,7 @@ node_ptr<T>::node_ptr(T * ptr)
 	: ptr_(ptr)
 {
 	if (ptr_)
-		ptr_->addref();6
+		ptr_->addref();
 }
 
 template <typename T>
@@ -107,9 +107,12 @@ T * node_ptr<T>::operator->() const
 
 template <typename T>
 template <typename U>
-node_ptr<U> node_ptr<T>::cast() const
+std::enable_if_t<is_node_intf<U>::value, node_ptr<U>> node_ptr<T>::cast()
 {
-	return { ptr_ ? ptr_->cast<U>() : nullptr };
+	if (!ptr_ || ptr_->node_type() != U::node_type_id)
+		return node_ptr<U>();
+
+	return node_ptr<U>(static_cast<U *>(ptr_));
 }
 
 template <typename T>

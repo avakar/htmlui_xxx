@@ -8,37 +8,52 @@ node_intf::node_intf(uint16_t node_type, document_intf * document)
 
 node_intf::~node_intf()
 {
-	while (first_child_)
-	{
-		if (first_child_->ref_count_ > 1 || !first_child_->first_child_)
-		{
-			first_child_->parent_ = nullptr;
-			first_child_->next_sibling_->previous_sibling_ = nullptr;
-			first_child_ = std::move(first_child_->next_sibling_);
-		}
-		else
-		{
-			first_child_->next_sibling_->previous_sibling_ = 
-			first_child_->last_child_->next_sibling_ = std::move(first_child_->next_sibling_);
-		}
-	}
+	// XXX
 }
 
 void node_intf::addref()
 {
-	++ref_count_;
+	node_intf * cur = this;
 
-	if (document_)
-		document_->addref();
+	while (cur && ++cur->ref_count_ == 1)
+		cur = cur->parent_? cur->parent_: cur->document_;
+}
+
+void node_intf::delete_tree(node_intf * n)
+{
+	while (n)
+	{
+		node_intf * next;
+
+		assert(n->ref_count_ == 0);
+		if (n->first_child_)
+		{
+			next = n->first_child_;
+			n->last_child_->next_sibling_ = n->next_sibling_;
+		}
+		else
+		{
+			next = n->next_sibling_;
+		}
+
+		delete n;
+		n = next;
+	}
 }
 
 void node_intf::release()
 {
-	if (document_)
-		document_->release();
+	node_intf * cur = this;
 
-	if (--ref_count_ == 0)
-		delete this;
+	while (--cur->ref_count_ == 0)
+	{
+		node_intf * next = cur->parent_? cur->parent_: cur->document_;
+
+		if (!cur->parent_)
+			delete_tree(cur);
+
+		cur = next;
+	}
 }
 
 node node_intf::parent_node() const
@@ -53,39 +68,52 @@ document node_intf::owner_document() const
 
 node node_intf::remove_child(node old_child)
 {
+	assert(old_child);
 	assert(old_child->parent_ == this);
 
 	if (old_child->previous_sibling_)
-		old_child->previous_sibling_->next_sibling_ = std::move(old_child->next_sibling_);
+		old_child->previous_sibling_->next_sibling_ = old_child->next_sibling_;
 	else
-		first_child_ = std::move(old_child->next_sibling_);
+		first_child_ = old_child->next_sibling_;
 
 	if (old_child->next_sibling_)
 		old_child->next_sibling_->previous_sibling_ = old_child->previous_sibling_;
 	else
 		last_child_ = old_child->previous_sibling_;
 
-	old_child->next_sibling_.reset();
+	old_child->next_sibling_ = nullptr;
 	old_child->previous_sibling_ = nullptr;
 	old_child->parent_ = nullptr;
+
+	assert(old_child->document_ == document_ || (document_ == nullptr && old_child->document_ == this));
+	assert(old_child->ref_count_ >= 1);
+	old_child->document_->addref();
+	this->release();
 
 	return old_child;
 }
 
 node node_intf::append_child(node new_child)
 {
+	assert(new_child);
+	assert(new_child->document_ == document_ || (document_ == nullptr && new_child->document_ == this));
+
+	assert(new_child->ref_count_ >= 1);
+	this->addref();
+
 	if (node_intf * p = new_child->parent_)
 		p->remove_child(new_child);
 
 	if (!last_child_)
-		first_child_ = new_child;
+		first_child_ = new_child.get();
 	else
-		last_child_->next_sibling_ = new_child;
+		last_child_->next_sibling_ = new_child.get();
 
 	new_child->previous_sibling_ = last_child_;
 	last_child_ = new_child.get();
 	new_child->parent_ = this;
 
+	new_child->document_->release();
 	return new_child;
 }
 

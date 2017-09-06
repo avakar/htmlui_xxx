@@ -479,6 +479,8 @@ int main(int argc, char * argv[])
 		body->append_child(ddoc->create_text_node(
 			"Mauris nec volutpat libero, sit amet maximus augue. Proin ac maximus ante, eu convallis elit. Donec rutrum et arcu ac cursus."));
 
+		ddoc->append_child(html);
+
 		auto & z = pm->get_element_data(em);
 	}
 

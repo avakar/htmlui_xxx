@@ -20,7 +20,7 @@ struct _is_one_of<T, T, Tn...>
 };
 
 template <typename T, typename T0, typename... Tn>
-struct _is_one_of
+struct _is_one_of<T, T0, Tn...>
 	: _is_one_of<T, Tn...>
 {
 };
@@ -29,6 +29,12 @@ struct node_intf;
 struct element_intf;
 struct text_intf;
 struct document_intf;
+
+template <typename T>
+struct is_node_intf
+	: _is_one_of<T, element_intf, text_intf, document_intf>
+{
+};
 
 template <typename T>
 struct node_ptr final
@@ -60,7 +66,7 @@ struct node_ptr final
 	T * operator->() const;
 
 	template <typename U>
-	node_ptr<U> cast() const;
+	std::enable_if_t<is_node_intf<U>::value, node_ptr<U>> cast();
 
 	bool operator==(node_ptr const & rhs) const;
 	bool operator!=(node_ptr const & rhs) const;
@@ -93,9 +99,6 @@ struct node_intf
 
 	uint16_t node_type() const;
 
-	template <typename U>
-	std::enable_if_t<_is_one_of<U, element_intf, text_intf, document_intf>::value, U *> cast();
-
 	std::string_view node_name() const;
 
 	node parent_node() const;
@@ -125,6 +128,8 @@ protected:
 	virtual ~node_intf();
 
 private:
+	static void delete_tree(node_intf * n);
+
 	size_t ref_count_ = 0;
 
 	uint16_t type_;
@@ -144,6 +149,8 @@ private:
 struct element_intf
 	: node_intf
 {
+	static constexpr uint16_t node_type_id = element_node;
+
 	std::string_view tag_name() const;
 
 	bool has_attribute(std::string_view name) const;
@@ -175,6 +182,8 @@ private:
 struct text_intf
 	: character_data_intf
 {
+	static constexpr uint16_t node_type_id = text_node;
+
 	std::string whole_text() const;
 
 	explicit text_intf(document_intf * doc);
@@ -183,6 +192,8 @@ struct text_intf
 struct document_intf
 	: node_intf
 {
+	static constexpr uint16_t node_type_id = document_node;
+
 	document_intf();
 
 	virtual element create_element(std::string_view local_name) = 0;
