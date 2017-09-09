@@ -9,6 +9,8 @@ add_executable(avakar_tiny_html
     dom.h
     dom_impl.h
     css.h
+	html_parser.cpp
+	html_parser.h
     )
 target_link_libraries(avakar_tiny_html avakar_di)
 target_compile_options(avakar_tiny_html PUBLIC "/std:c++17")
